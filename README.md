@@ -51,6 +51,22 @@ combat et journal sont synchronisés en direct. Il faut un petit projet Firebase
 - Les autres joueurs n'ont besoin d'aucune clé. Sans hôte, passe en MJ humain.
 - La clé reste dans le navigateur de l'hôte (visible via ses outils de développement) ; ne la partage jamais.
 
+### MJ et joueurs
+
+- Celui qui **crée la campagne** est le **MJ** (onglet Monde → « Devenir le MJ » / « Prendre le rôle de MJ » pour changer).
+- **Le MJ** voit tout : PV et CA exacts des ennemis, monde, outils de combat, Monstropedia complet, et l'onglet **Écran du MJ**
+  (notes privées enregistrées automatiquement).
+- **Les joueurs** voient les ennemis avec un simple état (*Indemne, Blessé, Mal en point, Agonisant, Vaincu*), sans PV ni CA,
+  ne peuvent ni modifier le monde ni gérer le combat, et ont un Monstropedia réduit (nom, type, habitat, description).
+  Les messages de jet cachent la CA de l'ennemi, et le MJ Claude a pour consigne de ne jamais révéler les PV exacts.
+- Tant qu'aucun MJ n'est désigné (anciennes campagnes), tout le monde voit tout.
+- **Notes privées** : en ligne, elles sont écrites sous `rooms/{code}/private/{uid}/…` et seules les règles Firestore
+  (`request.auth.uid == uid`) en autorisent la lecture : seul le navigateur qui les a écrites les relit, ce qui veut dire qu'elles
+  ne suivent pas le MJ d'un appareil à l'autre. **Après une mise à jour, republie `firestore.rules` dans la console Firebase**
+  (Firestore Database → Règles → Publier), sinon n'importe quel joueur connecté pourrait lire ces notes.
+- Le masquage est **visuel** : la base contient les chiffres réels, et un joueur qui sait inspecter son navigateur pourrait
+  les lire. Entre amis, ça suffit.
+
 ### Sécurité et limites
 
 - Quiconque a le code peut **lire et modifier** la table. Ne le donne qu'à tes joueurs ; il est impossible de lister les tables.

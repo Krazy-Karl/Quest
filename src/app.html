@@ -255,6 +255,7 @@ label.chip input{width:auto;box-shadow:none}
   <section id="p-bestiaire" class="frame sec" hidden></section>
   <section id="p-journal" class="frame sec" hidden></section>
   <section id="p-monde" class="frame sec" hidden></section>
+  <section id="p-mj" class="frame sec" hidden></section>
 </main>
 </div>
 <div id="toast" class="toast" hidden></div>
@@ -262,7 +263,7 @@ label.chip input{width:auto;box-shadow:none}
 <script>
 (function(){
 'use strict';
-const TABS=[['camps','Campagnes'],['jeu','La Table'],['bestiaire','Monstropedia'],['journal','Journal'],['monde','Monde']];
+const TABS=[['camps','Campagnes'],['jeu','La Table'],['bestiaire','Monstropedia'],['journal','Journal'],['monde','Monde'],['mj','Écran du MJ']];
 const RACES=['Human','Elf','Dwarf','Halfling','Gnome','Half-elf','Half-orc','Dragonkin','Catfolk','Sylvan'];
 const CLASSES=['Warrior','Paladin','Ranger','Rogue','Bard','Mage','Sorcerer','Warlock','Cleric','Druid','Monk','Barbarian','Alchemist'];
 const HISTO=['Soldier','Noble','Scholar','Criminal','Artisan','Merchant','Hermit','Acolyte','Wanderer','Sailor','Peasant','Hunter'];
@@ -316,7 +317,7 @@ const SIZES=[15,16,17,19,21];
 const SLOTS=[['tete','Tête'],['cou','Cou'],['torse','Torse'],['mains','Mains'],['main1','Main princ.'],['main2','Main second.'],['ceinture','Ceinture'],['jambes','Jambes'],['pieds','Pieds'],['anneau','Anneau']];
 const STATS=[['str','Force','FOR'],['dex','Dextérité','DEX'],['con','Constitution','CON'],['int','Intelligence','INT'],['wis','Sagesse','SAG'],['cha','Charisme','CHA']];
 const KINDS={quete:'Quête',pnj:'Personnage',lieu:'Lieu',note:'Note'};
-const S={db:null,sample:null,dl:null,tab:'jeu',presence:{},handled:new Set(),bType:'',bMin:1,bMax:10,bSort:'dg',camps:[],camp:null,combat:[],ini:{ordre:[],tour:0,round:0},dd:0,skOpen:false,target:null,adv:'n',atkEdit:false,combatOpen:false,foeForm:false,itemSel:null,creating:false,fs:+(store('fs')||2),pjs:[],bestiary:[],journal:[],msgs:[],meta:{},sel:null,busy:false,ctl:null,live:{},loaded:{},dbFail:false,diceOut:null,bfilter:'',jfilter:'all',speak:'pj'};
+const S={db:null,sample:null,dl:null,tab:'jeu',notes:'',presence:{},handled:new Set(),bType:'',bMin:1,bMax:10,bSort:'dg',camps:[],camp:null,combat:[],ini:{ordre:[],tour:0,round:0},dd:0,skOpen:false,target:null,adv:'n',atkEdit:false,combatOpen:false,foeForm:false,itemSel:null,creating:false,fs:+(store('fs')||2),pjs:[],bestiary:[],journal:[],msgs:[],meta:{},sel:null,busy:false,ctl:null,live:{},loaded:{},dbFail:false,diceOut:null,bfilter:'',jfilter:'all',speak:'pj'};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const mod=v=>Math.floor((Number(v||10)-10)/2);
@@ -350,6 +351,10 @@ const inParty=id=>(S.meta.party||[]).includes(id);
 const cpath=(col,id)=>'campagnes/'+S.camp+'/'+col+'/'+id;
 const writeMeta=patch=>{if(!S.camp){toast('Crée d’abord une campagne.');return Promise.reject(new Error('nocamp'))}Object.assign(S.meta,patch);return write('campagnes/'+S.camp,patch,true)};
 const online=()=>!!(window.claude&&window.claude.standalone&&window.claude.mode==='online');
+const isGM=()=>!online()||!S.meta.gmId||S.meta.gmId===window.claude.me;
+const foeState=e=>e.ko||e.pv<=0?'Vaincu':e.pv>=e.pvMax*0.75?'Indemne':e.pv>=e.pvMax*0.5?'Blessé':e.pv>=e.pvMax*0.25?'Mal en point':'Agonisant';
+const foeStep=e=>e.ko||e.pv<=0?0:e.pv>=e.pvMax*0.75?100:e.pv>=e.pvMax*0.5?66:e.pv>=e.pvMax*0.25?33:12;
+const notesPath=()=>online()?`private/${window.claude.uid}/notes/${S.camp}`:(window.claude&&window.claude.standalone?`private/me/notes/${S.camp}`:`gmnotes/${S.camp}`);
 const isHost=()=>online()&&S.meta.host===window.claude.me;
 function postMsg(m){if(!S.camp){toast('Aucune campagne en cours.');return Promise.resolve()}const t=Date.now();return write(cpath('table','m'+t+uid().slice(0,3)),{t,...m}).catch(()=>{})}
 async function removePj(id){
@@ -401,12 +406,13 @@ function watch(name,query,apply){
   },e=>{clearTimeout(t);S.dbFail=true;toast('Lecture impossible ('+(e.code||'?')+')');render('all')});
 }
 function selectCamp(id,silent){
-  ['table','journal','combat'].forEach(n=>{if(S.live[n]){S.live[n]();delete S.live[n]}S.loaded[n]=false});
-  S.camp=id;if(id)store('camp',id);S.msgs=[];S.journal=[];S.combat=[];S.ini={ordre:[],tour:0,round:0};S.target=null;S.combatOpen=false;
+  ['table','journal','combat','notes'].forEach(n=>{if(S.live[n]){S.live[n]();delete S.live[n]}S.loaded[n]=false});
+  S.camp=id;if(id)store('camp',id);S.notes='';S.msgs=[];S.journal=[];S.combat=[];S.ini={ordre:[],tour:0,round:0};S.target=null;S.combatOpen=false;
   const c=S.camps.find(x=>x.id===id);S.meta=c||{};
   if(id&&S.db){
     watch('table',S.db.collection('campagnes/'+id+'/table').orderBy('t','desc').limit(150),sn=>{if(S.camp!==id)return;S.msgs=sn.docs.map(d=>({id:d.id,...d.data()})).reverse();render('table');autoGM()});
     watch('journal',S.db.collection('campagnes/'+id+'/journal').orderBy('t','desc').limit(300),sn=>{if(S.camp!==id)return;S.journal=sn.docs.map(d=>({id:d.id,...d.data()}));render('journal')});
+    watch('notes',S.db.doc(notesPath()),sn=>{if(S.camp!==id)return;const v=sn.exists?(sn.data().texte||''):'';const ed=document.activeElement&&document.activeElement.id==='gmn';if(!ed&&v!==S.notes){S.notes=v;render('mj')}});
     watch('combat',S.db.doc('campagnes/'+id+'/combat/etat'),sn=>{if(S.camp!==id)return;const dd=sn.exists?sn.data():{};S.combat=dd.liste||[];S.ini={ordre:dd.ordre||[],tour:dd.tour||0,round:dd.round||0};render('table');render('fiche')});
   }
   const pa=S.meta.party||[];if(pa.length&&!pa.includes(S.sel))S.sel=pa[0];
@@ -423,7 +429,7 @@ function setup(){
     const cur=S.camps.find(c=>c.id===S.camp);
     if(!cur){const st=store('camp');const pk=S.camps.find(c=>c.id===st)||S.camps[0];selectCamp(pk?pk.id:null,true)}else{S.meta=cur}
     if(!S.initTab){S.initTab=1;if(!S.hashAtLoad)show(S.camps.length?'jeu':'camps')}
-    head();render('all');if(!S.camps.length&&S.loaded.pj)maybeMigrate()});
+    tabs();if(S.tab==='mj'&&!isGM())show('jeu');head();render('all');if(!S.camps.length&&S.loaded.pj)maybeMigrate()});
 }
 
 /* ---------- rendu ---------- */
@@ -433,19 +439,20 @@ function head(){
   el.innerHTML=`<select id="camp-sel" class="hsel" aria-label="Campagne en cours">${S.camps.map(c=>`<option value="${c.id}" ${c.id===S.camp?'selected':''}>${esc(c.nom||'Sans nom')}</option>`).join('')}</select> <span>· ${m.mj==='humain'?'MJ humain':'MJ Claude'} · ${party().length} héros${online()?` · ● ${Math.max(1,Object.values(S.presence).filter(p=>Date.now()-(p.t||0)<60000).length)} en ligne`:''}</span>`;
 }
 function render(which,force){
-  if(which==='all'){['camps','table','fiche','bestiaire','journal','monde'].forEach(k=>render(k));return}
+  if(which==='all'){['camps','table','fiche','bestiaire','journal','monde','mj'].forEach(k=>render(k));return}
   if(which==='des'){const r=$('#dres');if(r&&S.diceOut)r.textContent=S.diceOut.expr+' → '+fmtRoll(S.diceOut);return}
   if(which==='fiche'&&S.creating&&!force&&$('#n-name'))return;
   const inJeu=which==='table'||which==='fiche';
   if(inJeu?S.tab!=='jeu':which!==S.tab)return;
   const el=inJeu?$(which==='table'?'#right':'#left'):$('#p-'+which);if(!el)return;
   if(!force&&which!=='table'&&el.contains(document.activeElement)&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;
-  ({camps:rCamps,table:rTable,fiche:rFiche,bestiaire:rBest,journal:rJournal,monde:rMonde})[which](el);
+  ({camps:rCamps,table:rTable,fiche:rFiche,bestiaire:rBest,journal:rJournal,monde:rMonde,mj:rMj})[which](el);
 }
 function tabs(){
-  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('')+`<span style="flex:1"></span>${window.claude&&window.claude.standalone?'<button data-cfg aria-label="Réglages" title="Table en ligne, pseudo, clé API">⚙</button>':''}<button data-snd aria-label="Sons" title="Sons ${SFX.on?'activés':'coupés'}">${SFX.on?'♪':'♪̸'}</button><button data-fs="-1" aria-label="Texte plus petit" title="Texte plus petit">A−</button><button data-fs="1" aria-label="Texte plus grand" title="Texte plus grand">A+</button>`;
+  $('#tabs').innerHTML=TABS.filter(([k])=>k!=='mj'||isGM()).map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('')+`<span style="flex:1"></span>${window.claude&&window.claude.standalone?'<button data-cfg aria-label="Réglages" title="Table en ligne, pseudo, clé API">⚙</button>':''}<button data-snd aria-label="Sons" title="Sons ${SFX.on?'activés':'coupés'}">${SFX.on?'♪':'♪̸'}</button><button data-fs="-1" aria-label="Texte plus petit" title="Texte plus petit">A−</button><button data-fs="1" aria-label="Texte plus grand" title="Texte plus grand">A+</button>`;
 }
 function show(t){
+  if(t==='mj'&&!isGM())t='jeu';
   S.tab=t;tabs();TABS.forEach(([k])=>{$('#p-'+k).hidden=k!==t});
   try{history.replaceState(null,'','#'+t)}catch(e){}
   if(t==='jeu'){render('fiche');render('table');scrollLog()}else render(t);
@@ -508,24 +515,25 @@ function rTable(el){
   const pj=curPj(),m=S.meta,ia=m.mj!=='humain';
   const lastRoll=[...S.msgs].reverse().find(x=>x.type==='roll'&&x.who!=='Le MJ');
   const msgs=S.msgs.filter(x=>x.type!=='req').map(x=>{
+    const tx=isGM()?x.text:(x.pub||x.text);
     const c=(x.type==='mj'?'mj':x.type==='roll'?'roll':x.type==='sys'?'sys':x.type==='ooc'?'ooc':'')+(x.type==='roll'&&x.nat===20?' crit':x.type==='roll'&&x.nat===1?' fumble':'');
     const who=x.type==='mj'?(x.mode==='ia'?'Le Maître du Jeu':'Le MJ'):x.type==='ooc'?(x.who||'')+' (hors-jeu)':x.who||'';
     const tag=x.kind==='atk'?'':x.type==='roll'&&x.nat===20?' ✦ Réussite critique !':x.type==='roll'&&x.nat===1?' ✕ Échec critique':'';
     const quick=lastRoll&&x.id===lastRoll.id?(x.kind==='atk'?atkTools(x):(pj&&x.total>0?`<div class="tools"><button class="g small" data-act="dmg" data-n="${x.total}">Dégâts −${x.total} PV</button><button class="g small" data-act="heal" data-n="${x.total}">Soin +${x.total} PV</button></div>`:'')):'';
-    if(x.type==='roll')return `<div class="msg ${c}">${dieSvg(20,'rico')}<span class="who">${esc(who)}</span><span class="rt">${esc(x.text)}${tag}</span></div>${quick}`;
-    return `<div class="msg ${c}">${x.type==='sys'?'':`<span class="who">${esc(who)}</span>`}${esc(x.text)}${x.type==='mj'?`<button class="x mnote" data-act="jnote" data-mid="${x.id}" title="Noter dans le journal" aria-label="Noter dans le journal">✎ Noter</button>`:''}</div>`}).join('')
+    if(x.type==='roll')return `<div class="msg ${c}">${dieSvg(20,'rico')}<span class="who">${esc(who)}</span><span class="rt">${esc(tx)}${tag}</span></div>${quick}`;
+    return `<div class="msg ${c}">${x.type==='sys'?'':`<span class="who">${esc(who)}</span>`}${esc(tx)}${x.type==='mj'?`<button class="x mnote" data-act="jnote" data-mid="${x.id}" title="Noter dans le journal" aria-label="Noter dans le journal">✎ Noter</button>`:''}</div>`}).join('')
     ||`<div class="note"><b>Pour commencer</b><br>1. Crée ton personnage dans la fiche${S.pjs.length?' (fait)':''}.<br>2. Onglet Monde : décris ou fais inventer l’univers.<br>3. Écris ici ce que ton personnage fait.</div>`;
   const lastMj=[...S.msgs].reverse().find(x=>x.type==='mj'||x.type==='joueur');
   const lastMsg=lastMj&&lastMj.type==='mj'?lastMj:null;
   const chips=lastMsg&&lastMsg.sugg&&lastMsg.sugg.length&&!S.busy?`<div class="chips" aria-label="Suggestions d'action">${lastMsg.sugg.map(x=>`<button class="chip" data-sugg="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:'';
   el.innerHTML=`<div class="chat">
   <div class="row small" style="margin-bottom:8px">
-    <div><label for="mode">Maître du jeu</label><select id="mode"><option value="ia" ${ia?'selected':''}>Claude (IA)</option><option value="humain" ${!ia?'selected':''}>Humain</option></select></div>
-    <div><label for="who">Parler en tant que</label><select id="who"><option value="pj" ${S.speak==='pj'?'selected':''}>${pj?esc(pj.name):'Personnage'}</option><option value="mj" ${S.speak==='mj'?'selected':''}>MJ (narration)</option><option value="ooc" ${S.speak==='ooc'?'selected':''}>Hors-jeu (HRP)</option></select></div>
+    ${isGM()?`<div><label for="mode">Maître du jeu</label><select id="mode"><option value="ia" ${ia?'selected':''}>Claude (IA)</option><option value="humain" ${!ia?'selected':''}>Humain</option></select></div>`:''}
+    <div><label for="who">Parler en tant que</label><select id="who"><option value="pj" ${S.speak==='pj'?'selected':''}>${pj?esc(pj.name):'Personnage'}</option>${isGM()?`<option value="mj" ${S.speak==='mj'?'selected':''}>MJ (narration)</option>`:''}<option value="ooc" ${S.speak==='ooc'?'selected':''}>Hors-jeu (HRP)</option></select></div>
     <button class="g" data-act="regen" ${S.busy||!S.msgs.some(x=>x.type==='joueur')?'disabled':''} title="Redemande une réponse au MJ. Les changements de fiche déjà faits ne sont pas annulés.">↻ Régénérer</button>
     <button class="g" data-act="undo" ${S.busy||!S.msgs.length?'disabled':''} title="Supprime le dernier message">↶ Annuler</button>
-    <button class="g" data-act="foeopen" title="Ouvrir le suivi de combat (ennemis, CA, PV)">⚔ Combat</button>
-    <button class="g" data-act="condense" ${S.busy||!S.msgs.length?'disabled':''} title="Claude résume la partie pour garder la mémoire">Condenser</button>
+    ${isGM()?`<button class="g" data-act="foeopen" title="Ouvrir le suivi de combat (ennemis, CA, PV)">⚔ Combat</button>`:''}
+    ${isGM()?`<button class="g" data-act="condense" ${S.busy||!S.msgs.length?'disabled':''} title="Claude résume la partie pour garder la mémoire">Condenser</button>`:''}
   </div>
   ${combatStrip()}
   <div id="log" class="log" aria-live="polite">${msgs}</div>
@@ -611,29 +619,21 @@ function newPjForm(){
 /* ----- Monstropedia ----- */
 function rBest(el){
   if(!S.db){el.innerHTML=noDb();return}
+  const gm=isGM();
   const f=plain(S.bfilter);const types=[...new Set(S.bestiary.map(b=>b.type).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
   const nm=(a,b)=>String(a.nom).localeCompare(String(b.nom),'fr');
   const cmp={dg:(a,b)=>(a.dg||0)-(b.dg||0)||nm(a,b),dgd:(a,b)=>(b.dg||0)-(a.dg||0)||nm(a,b),nom:nm};
-  const list=S.bestiary.filter(b=>(!f||plain([b.nom,b.type,b.habitat,b.capacites,b.desc,b.faiblesse].join(' ')).includes(f))&&(!S.bType||b.type===S.bType)&&(b.dg||1)>=S.bMin&&(b.dg||1)<=S.bMax).sort(cmp[S.bSort]||cmp.dg);
+  const list=S.bestiary.filter(b=>(!f||plain([b.nom,b.type,b.habitat,b.capacites,b.desc,b.faiblesse].join(' ')).includes(f))&&(!S.bType||b.type===S.bType)&&(b.dg||1)>=S.bMin&&(b.dg||1)<=S.bMax).sort(cmp[gm?S.bSort:'nom']||cmp.dg);
   const dgo=(v)=>[...Array(10)].map((_,i)=>`<option value="${i+1}" ${v===i+1?'selected':''}>${i+1}</option>`).join('');
   el.innerHTML=`<h2>Monstropedia</h2>
   <div class="row"><div class="grow"><label for="bf">Chercher</label><input id="bf" value="${esc(S.bfilter)}" placeholder="nom, type, habitat, faiblesse…"></div>
    <div><label for="bt">Type</label><select id="bt"><option value="">Tous</option>${types.map(t=>`<option ${S.bType===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
-   <div style="width:74px"><label for="bmin">DG min</label><select id="bmin">${dgo(S.bMin)}</select></div><div style="width:74px"><label for="bmax">DG max</label><select id="bmax">${dgo(S.bMax)}</select></div>
-   <div><label for="bs">Tri</label><select id="bs"><option value="dg" ${S.bSort==='dg'?'selected':''}>Danger ↑</option><option value="dgd" ${S.bSort==='dgd'?'selected':''}>Danger ↓</option><option value="nom" ${S.bSort==='nom'?'selected':''}>Nom</option></select></div>
-   <button class="g" data-act="newmon">+ Créature</button></div>
-  <p class="muted small">${list.length} sur ${S.bestiary.length} créatures. Danger (DG) : 1 = rat géant, 10 = calamité. XP donnée par DG : 50, 100, 200, 450, 700, 1100, 1800, 2300, 2900, 5000.</p>
+   ${gm?`<div style="width:74px"><label for="bmin">DG min</label><select id="bmin">${dgo(S.bMin)}</select></div><div style="width:74px"><label for="bmax">DG max</label><select id="bmax">${dgo(S.bMax)}</select></div>`:''}
+   ${gm?`<div><label for="bs">Tri</label><select id="bs"><option value="dg" ${S.bSort==='dg'?'selected':''}>Danger ↑</option><option value="dgd" ${S.bSort==='dgd'?'selected':''}>Danger ↓</option><option value="nom" ${S.bSort==='nom'?'selected':''}>Nom</option></select></div>`:''}
+   ${gm?`<button class="g" data-act="newmon">+ Créature</button>`:''}</div>
+  <p class="muted small">${list.length} sur ${S.bestiary.length} créatures. ${gm?'Danger (DG) : 1 = rat géant, 10 = calamité. XP donnée par DG : 50, 100, 200, 450, 700, 1100, 1800, 2300, 2900, 5000.':'Seules les informations connues du groupe sont affichées.'}</p>
   <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(290px,1fr))">
-  ${list.map(b=>`<article class="card mon" style="--c:${dgColor(+b.dg||1)}">
-    <div class="row" style="flex-wrap:nowrap;align-items:center">${monsterArt(b)}<div style="min-width:0;flex:1"><strong class="cname">${esc(b.nom)}</strong><div class="muted small">${esc(b.type||'')}${b.habitat?' · '+esc(b.habitat):''}</div></div><span class="tag" title="Danger">DG ${b.dg??'?'}</span></div>
-    <div class="num small" style="margin:6px 0 2px">PV ${b.pv??'?'} · CA ${b.ca??'?'} · XP ${XP_DG[Math.max(1,Math.min(10,+b.dg||1))]}</div>
-    <div class="num small muted">${esc(b.att||'')}</div>
-    <div class="small" style="margin-top:4px">${esc(b.desc||'')}</div>
-    ${b.capacites?`<div class="small" style="margin-top:4px"><b>Capacités.</b> ${esc(b.capacites)}</div>`:''}
-    ${b.faiblesse?`<div class="small" style="margin-top:4px;color:var(--bad)"><b>Faiblesse.</b> ${esc(b.faiblesse)}</div>`:''}
-    ${b.butin?`<div class="small muted" style="margin-top:4px"><b>Butin.</b> ${esc(b.butin)}</div>`:''}
-    <div class="row" style="margin-top:8px"><button class="b small" data-act="tofight" data-id="${b.id}" title="Ajoute 1 exemplaire au combat en cours">⚔ Au combat</button><button class="g small" data-act="lootmon" data-id="${b.id}" title="Tire le butin pour le héros affiché">Butin</button><button class="g small" data-act="editmon" data-id="${b.id}">Modifier</button><button class="x small" data-act="delmon" data-id="${b.id}" title="Supprimer cette créature" aria-label="Supprimer">✕</button></div>
-  </article>`).join('')||'<div class="note">Aucune créature ne correspond à ces filtres.</div>'}
+  ${list.map(b=>monCard(b,gm)).join('')||'<div class="note">Aucune créature ne correspond à ces filtres.</div>'}
   </div>
   <div id="monform"></div>`;
 }
@@ -694,6 +694,7 @@ function rMonde(el){
   if(!S.db){el.innerHTML=noDb();return}
   if(!S.camp){el.innerHTML=`<h2>Le monde</h2><div class="note">Le monde appartient à une campagne. Crée-en une dans l’onglet Campagnes.</div>`;return}
   const m=S.meta;
+  if(!isGM()){el.innerHTML=`<h2>${esc(m.nom||'Campagne')}</h2><p class="muted">${esc(m.ton||'')}</p>${sa?standaloneBlock():''}`;return}
   el.innerHTML=`<h2>Le monde</h2>
   <div class="row"><div class="grow"><label for="c-nom">Nom de la campagne</label><input id="c-nom" value="${esc(m.nom||'')}"></div><div class="grow"><label for="c-ton">Ton</label><input id="c-ton" value="${esc(m.ton||'')}" placeholder="sombre, épique, humoristique…"></div></div>
   <div style="margin-top:10px"><label for="c-monde">Description du monde (lue par le MJ à chaque tour)</label><textarea id="c-monde" rows="9">${esc(m.monde||'')}</textarea></div>
@@ -945,11 +946,11 @@ function getTarget(){
 }
 async function hurt(tg,n){
   if(!tg||!n||tg.k==='ca')return '';
-  if(tg.k==='enemy'){let out='';
+  if(tg.k==='enemy'){let out='',pubm='';
     await mutateCombat(l=>l.map(e=>{if(e.id!==tg.id)return e;const pv=Math.max(0,Math.min(e.pvMax||999,e.pv-n));
-      out=pv<=0?`${e.nom} est vaincu !`:`${e.nom} ${n>0?'perd':'récupère'} ${Math.abs(n)} PV (${pv}/${e.pvMax})`;return {...e,pv,ko:pv<=0}}));
+      out=pv<=0?`${e.nom} est vaincu !`:`${e.nom} ${n>0?'perd':'récupère'} ${Math.abs(n)} PV (${pv}/${e.pvMax})`;pubm=pv<=0?out:(n>0?`${e.nom} encaisse le coup`:`${e.nom} reprend des forces`);return {...e,pv,ko:pv<=0}}));
     setTimeout(()=>floatNum(n>0?'−'+n:'+'+(-n),n>0?'dmg':'heal',document.querySelector(`.foe[data-id="${tg.id}"]`)),60);
-    if(out)await postMsg({type:'sys',text:out});return out}
+    if(out)await postMsg({type:'sys',text:out,pub:pubm});return out}
   let before=0;
   const c=await patchPj(tg.id,x=>{before=x.pv;if(x.etats.includes('Mort')&&n<0)return;const mx=x.pvMax>0?x.pvMax:Infinity;x.pv=Math.max(0,Math.min(mx,x.pv-n));
     if(x.pv<=0){if(!x.etats.includes('À terre'))x.etats.push('À terre');if(before<=0&&n>0){x.etats=x.etats.filter(e=>e!=='Stabilisé');x.mort={s:x.mort.s,f:x.mort.f+1};if(x.mort.f>=3&&!x.etats.includes('Mort'))x.etats.push('Mort')}}
@@ -990,7 +991,8 @@ async function doAttack(pj,a,tg,adv){
   if(a.pm>0)txt+=` · −${a.pm} PM`;
   rollFx({expr:a.nom,total:a.jet==='atk'?nat:Math.abs(dmg),nat:a.jet==='atk'?nat:0,f:a.jet==='atk'?20:dieParts(a.de).f});
   setTimeout(()=>snd(hit===true?(crit?'crit':'hit'):hit===false?'miss':a.jet==='soin'?'heal':'hit'),380);
-  await postMsg({type:'roll',kind:'atk',who:pj.name,text:txt,nat,hit,total:0,jds});
+  const pub=ca?txt.replace(` vs CA ${ca}`,''):txt;
+  await postMsg({type:'roll',kind:'atk',who:pj.name,text:txt,...(pub!==txt?{pub}:{}),nat,hit,total:0,jds});
   if(a.jet==='atk'&&hit===true&&tg)await hurt(tg,dmg);
   else if(a.jet==='auto'&&tg)await hurt(tg,dmg);
   else if(a.jet==='soin'&&tg)await hurt(tg,dmg);
@@ -1012,7 +1014,7 @@ async function enemyAttack(e,pj,o){
 const attackById=(p,id)=>p.atq.find(a=>a.id===id);
 function atkSection(p){
   const tg=getTarget(),t=S.target||{};
-  const opts=`<option value="">— aucune cible —</option>${S.combat.filter(e=>!e.ko).length?`<optgroup label="Ennemis">${S.combat.filter(e=>!e.ko).map(e=>`<option value="e:${e.id}" ${t.id===e.id?'selected':''}>${esc(e.nom)} · CA ${e.ca} · PV ${e.pv}/${e.pvMax}</option>`).join('')}</optgroup>`:''}<optgroup label="Héros">${S.pjs.map(q=>`<option value="p:${q.id}" ${t.id===q.id?'selected':''}>${esc(q.name)} · CA ${q.ca}</option>`).join('')}</optgroup><option value="ca" ${t.k==='ca'?'selected':''}>CA libre…</option>`;
+  const opts=`<option value="">— aucune cible —</option>${S.combat.filter(e=>!e.ko).length?`<optgroup label="Ennemis">${S.combat.filter(e=>!e.ko).map(e=>`<option value="e:${e.id}" ${t.id===e.id?'selected':''}>${esc(e.nom)}${isGM()?` · CA ${e.ca} · PV ${e.pv}/${e.pvMax}`:` · ${foeState(e)}`}</option>`).join('')}</optgroup>`:''}<optgroup label="Héros">${S.pjs.map(q=>`<option value="p:${q.id}" ${t.id===q.id?'selected':''}>${esc(q.name)} · CA ${q.ca}</option>`).join('')}</optgroup><option value="ca" ${t.k==='ca'?'selected':''}>CA libre…</option>`;
   const adv=['n','a','d'];const lab={n:'Normal',a:'Avantage',d:'Désavantage'};
   const tiles=p.atq.map((a,i)=>{
     const ok=!(a.pm>0&&(p.pm||0)<a.pm);
@@ -1056,18 +1058,23 @@ function foeForm(){
 }
 function combatStrip(){
   if(!S.combat.length&&!S.combatOpen)return '';
-  const tg=getTarget(),pj=curPj(),act=activeActor(),pend=S.combat.filter(e=>e.ko&&!e.xpDone);
+  const gm=isGM(),tg=getTarget(),pj=curPj(),act=activeActor(),pend=S.combat.filter(e=>e.ko&&!e.xpDone);
   const ini=S.ini.ordre.length?`<div class="ini" role="list" aria-label="Ordre d’initiative"><span class="rnd">Round ${S.ini.round}</span>${S.ini.ordre.map((c,i)=>{const e=c.k==='enemy'?S.combat.find(x=>x.id===c.id):null;
     return `<span role="listitem" class="ic ${c.k} ${i===S.ini.tour?'on':''} ${e&&e.ko?'ko':''}">${esc(c.nom)} <b>${c.init}</b></span>`}).join('')}</div>`:'';
-  return `<div class="combat"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px"><strong class="cb">Combat</strong><span class="cbt"><button class="g small" data-act="rollini" title="Chacun lance d20 + Dextérité">Initiative</button>${S.ini.ordre.length?'<button class="b small" data-act="nextturn" title="Raccourci : N">Tour suivant ▸</button>':''}<button class="g small" data-act="foeadd">+ Ennemi</button>${pend.length?`<button class="b small" data-act="givexp">Distribuer ${pend.reduce((a,e)=>a+xpOf(e),0)} XP</button>`:''}${S.combat.length?`<button class="g small" data-act="foeclear">Terminer</button>`:`<button class="g small" data-act="foeclose">Fermer</button>`}</span></div>
-  ${ini}${S.foeForm?foeForm():''}
-  <div class="foes">${S.combat.map(e=>{const pct=e.pvMax>0?Math.max(0,100*e.pv/e.pvMax):0;
-   return `<div class="foe ${e.ko?'ko':''} ${tg&&tg.id===e.id?'tgt':''} ${act&&act.k==='enemy'&&act.id===e.id?'act':''}" data-id="${e.id}">${monsterArt(e)}<div class="fb"><div class="fh"><strong>${esc(e.nom)}</strong><span class="tag" title="Classe d’armure">CA ${e.ca}</span></div>
+  const card=e=>{const pct=e.pvMax>0?Math.max(0,100*e.pv/e.pvMax):0;
+    const cls=`foe ${e.ko?'ko':''} ${tg&&tg.id===e.id?'tgt':''} ${act&&act.k==='enemy'&&act.id===e.id?'act':''}`;
+    const tgtBtn=`<button class="g small ${tg&&tg.id===e.id?'on':''}" data-act="foetgt" data-id="${e.id}" ${e.ko?'disabled':''} title="Cibler">◎</button>`;
+    if(!gm)return `<div class="${cls}" data-id="${e.id}">${monsterArt({...e,dg:1})}<div class="fb"><div class="fh"><strong>${esc(e.nom)}</strong><span class="tag">${foeState(e)}</span></div>
+      <div class="fbar" role="img" aria-label="État : ${foeState(e)}"><i style="width:${foeStep(e)}%"></i></div><div class="fa">${tgtBtn}</div></div></div>`;
+    return `<div class="${cls}" data-id="${e.id}">${monsterArt(e)}<div class="fb"><div class="fh"><strong>${esc(e.nom)}</strong><span class="tag" title="Classe d’armure">CA ${e.ca}</span></div>
     <div class="fbar" role="img" aria-label="PV ${e.pv} sur ${e.pvMax}"><i style="width:${pct}%"></i><b>${e.pv}/${e.pvMax}</b></div>
     <div class="fa"><button class="g small" data-act="foehp" data-id="${e.id}" data-d="-1" aria-label="Un PV de moins">−</button><button class="g small" data-act="foehp" data-id="${e.id}" data-d="1" aria-label="Un PV de plus">+</button>
-    <button class="g small ${tg&&tg.id===e.id?'on':''}" data-act="foetgt" data-id="${e.id}" ${e.ko?'disabled':''} title="Cibler">◎</button>
+    ${tgtBtn}
     <button class="g small" data-act="foeatk" data-id="${e.id}" ${e.ko||!pj?'disabled':''} title="Fait attaquer ${pj?esc(e.nom)+' → '+esc(pj.name):''}">Attaque</button>
-    ${e.ko&&!e.looted?`<button class="g small" data-act="foeloot" data-id="${e.id}" title="Tire son butin pour le héros affiché">Fouiller</button>`:''}<button class="x" data-act="foedel" data-id="${e.id}" aria-label="Retirer">✕</button></div></div></div>`}).join('')||'<span class="muted small">Aucun ennemi. Ajoute-en un, génère une rencontre, ou laisse le MJ Claude en créer.</span>'}</div></div>`;
+    ${e.ko&&!e.looted?`<button class="g small" data-act="foeloot" data-id="${e.id}" title="Tire son butin pour le héros affiché">Fouiller</button>`:''}<button class="x" data-act="foedel" data-id="${e.id}" aria-label="Retirer">✕</button></div></div></div>`};
+  return `<div class="combat"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px"><strong class="cb">Combat</strong><span class="cbt"><button class="g small" data-act="rollini" title="Chacun lance d20 + Dextérité">Initiative</button>${S.ini.ordre.length?'<button class="b small" data-act="nextturn" title="Raccourci : N">Tour suivant ▸</button>':''}${gm?`<button class="g small" data-act="foeadd">+ Ennemi</button>${pend.length?`<button class="b small" data-act="givexp">Distribuer ${pend.reduce((a,e)=>a+xpOf(e),0)} XP</button>`:''}${S.combat.length?`<button class="g small" data-act="foeclear">Terminer</button>`:`<button class="g small" data-act="foeclose">Fermer</button>`}`:''}</span></div>
+  ${ini}${S.foeForm&&gm?foeForm():''}
+  <div class="foes">${S.combat.map(card).join('')||'<span class="muted small">Aucun ennemi pour l’instant.</span>'}</div></div>`;
 }
 function atkTools(x){
   const bits=[];
@@ -1085,12 +1092,35 @@ function autoGM(){
   if(!last||last.type==='mj'||S.handled.has(last.id)||Date.now()-(last.t||0)>180000)return;
   S.handled.add(last.id);ask(last.text,S.pjs.find(x=>x.name===last.who)||null);
 }
+function rMj(el){
+  if(!S.db){el.innerHTML=noDb();return}
+  if(!isGM()){el.innerHTML='<h2>Écran du MJ</h2><div class="note">Cet écran est réservé au MJ.</div>';return}
+  if(!S.camp){el.innerHTML='<h2>Écran du MJ</h2><div class="note">Crée d’abord une campagne.</div>';return}
+  const where=online()?'Seul ce navigateur peut lire ces notes (protégées par les règles de la base). Si tu changes d’appareil ou si tu vides les données du navigateur, tu ne les retrouveras pas.':(window.claude&&window.claude.standalone?'Elles sont enregistrées dans ce navigateur.':'Elles sont enregistrées dans la base de la page : toute personne ayant accès en édition à la page peut les lire.');
+  el.innerHTML=`<h2>Écran du MJ</h2><p class="muted small">${where}</p>
+  <label for="gmn">Notes privées · ${esc(S.meta.nom||'campagne')}</label>
+  <textarea id="gmn" rows="16" placeholder="Secrets de l’intrigue, PNJ cachés, pièges, idées pour la prochaine session…">${esc(S.notes)}</textarea>
+  <p id="gmn-st" class="small muted" role="status">Les notes s’enregistrent toutes seules.</p>
+  ${online()?`<h3>Rôle</h3><p class="small">Tu es le MJ : tu vois les PV et la CA exacts des ennemis. Les joueurs n’en voient que l’état.</p>`:''}`;
+}
+function monCard(b,gm){
+  return `<article class="card mon" style="--c:${gm?dgColor(+b.dg||1):dgColor(1)}">
+    <div class="row" style="flex-wrap:nowrap;align-items:center">${monsterArt(gm?b:{...b,dg:1})}<div style="min-width:0;flex:1"><strong class="cname">${esc(b.nom)}</strong><div class="muted small">${esc(b.type||'')}${b.habitat?' · '+esc(b.habitat):''}</div></div>${gm?`<span class="tag" title="Danger">DG ${b.dg??'?'}</span>`:''}</div>
+    ${gm?`<div class="num small" style="margin:6px 0 2px">PV ${b.pv??'?'} · CA ${b.ca??'?'} · XP ${XP_DG[Math.max(1,Math.min(10,+b.dg||1))]}</div><div class="num small muted">${esc(b.att||'')}</div>`:''}
+    <div class="small" style="margin-top:4px">${esc(b.desc||'')}</div>
+    ${gm&&b.capacites?`<div class="small" style="margin-top:4px"><b>Capacités.</b> ${esc(b.capacites)}</div>`:''}
+    ${gm&&b.faiblesse?`<div class="small" style="margin-top:4px;color:var(--bad)"><b>Faiblesse.</b> ${esc(b.faiblesse)}</div>`:''}
+    ${gm&&b.butin?`<div class="small muted" style="margin-top:4px"><b>Butin.</b> ${esc(b.butin)}</div>`:''}
+    ${gm?`<div class="row" style="margin-top:8px"><button class="b small" data-act="tofight" data-id="${b.id}" title="Ajoute 1 exemplaire au combat en cours">⚔ Au combat</button><button class="g small" data-act="lootmon" data-id="${b.id}" title="Tire le butin pour le héros affiché">Butin</button><button class="g small" data-act="editmon" data-id="${b.id}">Modifier</button><button class="x small" data-act="delmon" data-id="${b.id}" title="Supprimer cette créature" aria-label="Supprimer">✕</button></div>`:''}
+  </article>`;
+}
 function standaloneBlock(){
   const c=window.claude,on=online(),host=S.meta.host,mine=on&&host===c.me;
   const names=Object.values(S.presence).filter(p=>Date.now()-(p.t||0)<60000).map(p=>p.name||'Joueur');
   return `<h3>${on?'Table en ligne':'Solo'}</h3>
   ${on?`<p class="small">Code : <b>${esc(c.room)}</b> · en ligne : ${esc(names.join(', ')||'toi')}</p>`:''}
   <div class="row"><button class="g" data-cfg>Réglages et lien de la table</button>${on&&S.meta.mj!=='humain'?`<button class="${mine?'b':'g'}" data-act="host" ${S.sample||mine?'':'disabled'}>${mine?'Tu es l’hôte du MJ Claude (cliquer pour quitter)':'Devenir l’hôte du MJ Claude'}</button>`:''}</div>
+  ${on?`<div class="row" style="margin-top:8px">${S.meta.gmId===c.me?'<button class="b" data-act="gmquit">Tu es le MJ (quitter ce rôle)</button>':`<button class="g" data-act="gmtake">${S.meta.gmId?'Prendre le rôle de MJ':'Devenir le MJ'}</button>`}</div><p class="small muted">${S.meta.gmId===c.me?'Tu vois tout : PV et CA des ennemis, monde, outils de combat et Écran du MJ.':S.meta.gmId?'Un autre joueur est le MJ : tu vois les ennemis sans leurs PV ni leur CA.':'Aucun MJ désigné : tout le monde voit tout. Désigne-le pour masquer les PV des ennemis.'}</p>`:''}
   ${on&&S.meta.mj!=='humain'?`<p class="small muted">${mine?'Ton navigateur répond aux joueurs avec ta clé API. Garde cet onglet ouvert.':host?'Un autre joueur est l’hôte du MJ.':'Aucun hôte : le MJ ne répondra pas tant qu’un joueur n’est pas devenu hôte.'}${S.sample?'':' Pour devenir hôte, ajoute ta clé API dans ⚙.'}</p>`:''}`;
 }
 function pjLine(p){return `${p.name} (${p.race||'?'} ${p.classe||'?'}, niv. ${p.niveau||1}) — PV ${p.pv}/${p.pvMax}${p.pmMax>0?`, PM ${p.pm}/${p.pmMax}`:''}, CA ${p.ca}, XP ${p.xp}, Or ${p.or}; `+STATS.map(([k,l])=>`${l} ${p.stats[k]} (${sgn(mod(p.stats[k]))})`).join(', ')+`; Équipé : ${SLOTS.map(([k,l])=>p.equip[k]?l+' '+p.equip[k]:'').filter(Boolean).join(', ')||'rien'}; États : ${p.etats.join(', ')||'aucun'}; Maîtrises : ${p.comp.join(', ')||'aucune'}; XP ${p.xp||0}/${nextXp(p.niveau)||'—'}; Attaques : ${p.atq.map(a=>`${a.nom} ${a.jet==='atk'?sgn(atkBonus(p,a))+' ':''}(${dmgLabel(p,a)}${a.pm?`, ${a.pm} PM`:''})`).join(', ')||'aucune'}; Inventaire : ${p.inv.map(i=>`${i.n}${(i.q||1)>1?' ×'+i.q:''}`).join(', ')||'vide'}`}
@@ -1107,7 +1137,7 @@ RÈGLES DU JEU : d20 + modificateur de caractéristique contre un seuil (facile 
 - Pour donner ou retirer un objet, appelle inventaire.
 - Quand une créature apparaît pour la première fois, appelle bestiaire_ajouter (si elle n'est pas déjà dans la liste ci-dessous).
 - COMBAT : les attaques que les joueurs déclenchent avec les boutons sont déjà résolues par le moteur (lignes « Nom : d20 … » dans les échanges) : raconte le résultat sans relancer. Si un joueur décrit une attaque en texte, appelle attaque_pj. Pour les attaques des ennemis, appelle attaque_ennemi (jet, CA et dégâts sont gérés pour toi). N'utilise pas lancer_des pour une attaque.
-- Quand un combat commence, enregistre les ennemis avec ennemi_ajouter (utilise bestiaire = nom d'une créature connue pour reprendre ses stats). Corrige avec ennemi_modifier, retire-les avec ennemi_retirer.
+${online()?'- Ne révèle JAMAIS les PV ni la CA exacts des ennemis dans ta narration : décris leur état (indemne, blessé, mal en point, agonisant).\n':''}- Quand un combat commence, enregistre les ennemis avec ennemi_ajouter (utilise bestiaire = nom d'une créature connue pour reprendre ses stats). Corrige avec ennemi_modifier, retire-les avec ennemi_retirer.
 - Pour appliquer ou lever un état (Empoisonné, À terre…), appelle etat_pj.
 - Pour équiper ou retirer un objet porté, appelle equiper.
 - Pour noter une quête, un PNJ important ou un lieu, appelle journal_ajouter.
@@ -1268,7 +1298,7 @@ document.addEventListener('click',async ev=>{
    case 'playcamp':selectCamp(t.dataset.id);show('jeu');break;
    case 'createcamp':{const nom=$('#nc-nom').value.trim();if(!nom)return toast('Donne un nom à la campagne.');
      const ids=[...document.querySelectorAll('.nc-p:checked')].map(x=>x.value);const id='c'+Date.now();
-     const d={nom,ton:$('#nc-ton').value.trim(),monde:'',resume:'',resumeAt:0,mj:'ia',party:ids,t:Date.now()};
+     const d={nom,gmId:online()?window.claude.me:'',ton:$('#nc-ton').value.trim(),monde:'',resume:'',resumeAt:0,mj:'ia',party:ids,t:Date.now()};
      S.camps=[{id,...d},...S.camps];await write('campagnes/'+id,d).catch(()=>{});selectCamp(id);show('monde');toast('Campagne créée. Décris le monde ou laisse Claude l’inventer.');break}
    case 'delcamp':if(t.dataset.sure!=='1'){t.dataset.sure='1';t.textContent='Confirmer (efface tout)';return}
      await removeCamp(t.dataset.id);break;
@@ -1312,6 +1342,9 @@ document.addEventListener('click',async ev=>{
    case 'jnote':{const m=S.msgs.find(x=>x.id===t.dataset.mid);if(!m)return;const titre=m.text.replace(/\s+/g,' ').slice(0,48)+(m.text.length>48?'…':'');
      await write(cpath('journal','j'+Date.now()+uid().slice(0,3)),{t:Date.now(),kind:'note',titre,texte:m.text}).catch(()=>{});toast('Ajouté au journal.');break}
    case 'fullkit':if(p)await fullKit(p);break;
+   case 'gmtake':{if(!online())break;if(S.meta.gmId&&S.meta.gmId!==window.claude.me&&t.dataset.sure!=='1'){t.dataset.sure='1';t.textContent='Confirmer : prendre le rôle du MJ actuel';return}
+     await writeMeta({gmId:window.claude.me}).catch(()=>{});tabs();head();render('all');toast('Tu es maintenant le MJ.');break}
+   case 'gmquit':{if(!online())break;await writeMeta({gmId:''}).catch(()=>{});tabs();head();render('all');if(S.tab==='mj')show('jeu');break}
    case 'stop':if(S.ctl)S.ctl.abort();break;
    case 'condense':condense();break;
    case 'newpj':S.creating=true;S.createAdd=true;render('fiche',true);break;
@@ -1386,6 +1419,8 @@ document.addEventListener('keydown',ev=>{
   if(ev.target.id==='expr'&&ev.key==='Enter'){document.querySelector('[data-act="rollx"]').click()}
 });
 
+let notesT;document.addEventListener('input',ev=>{if(ev.target.id!=='gmn')return;S.notes=ev.target.value;const st=$('#gmn-st');if(st)st.textContent='Enregistrement…';clearTimeout(notesT);
+  notesT=setTimeout(()=>write(notesPath(),{texte:S.notes,t:Date.now()}).then(()=>{const s2=$('#gmn-st');if(s2)s2.textContent='Enregistré ✓'}).catch(()=>{}),700)});
 document.addEventListener('toggle',e=>{if(e.target.classList&&e.target.classList.contains('skills'))S.skOpen=e.target.open},true);
 document.addEventListener('keydown',ev=>{
   if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName||'')||ev.ctrlKey||ev.metaKey||ev.altKey)return;

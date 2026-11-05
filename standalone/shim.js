@@ -56,7 +56,7 @@
     const auth = FB.getAuth(app);
     const emu = window.FIREBASE_EMULATOR;
     if (emu) FB.connectAuthEmulator(auth, `http://${emu.host}:${emu.authPort}`, { disableWarnings: true });
-    await FB.signInAnonymously(auth);
+    const cred = await FB.signInAnonymously(auth); state.uid = cred.user.uid;
     const fdb = FB.initializeFirestore(app, { ignoreUndefinedProperties: true });
     if (emu) FB.connectFirestoreEmulator(fdb, emu.host, emu.fsPort);
     const base = 'rooms/' + room;
@@ -233,7 +233,7 @@
     return db;
   })();
   window.claude = {
-    standalone: true, me: ME, get mode() { return state.mode; }, get room() { return state.room; },
+    standalone: true, me: ME, get mode() { return state.mode; }, get room() { return state.room; }, get uid() { return state.uid; },
     playerName: () => LS.get('gc_name') || '', openSettings,
     use: async name => {
       const db = await ready;

@@ -80,6 +80,41 @@ await bb.click('[data-roll=d20]');await T(1000);const ra=(await a.locator('.msg.
 await bb.click('[data-act=regen]');await T(400);ok(await bb.locator('.toast').innerText().then(t=>/hôte/.test(t)).catch(()=>false),'Bob (non hôte) ne peut pas régénérer');
 // persistance côté Bob
 await bb.reload();await rdy(bb);await T(1200);ok(await bb.locator('.msg.mj').count()===2,'Bob recharge la page : la partie est toujours là');
+// ===== rôles : MJ et joueurs =====
+await a.click('[data-tab=bestiaire]');await bb.click('[data-tab=bestiaire]');await T(500);
+ok(await a.locator('#tabs button:has-text("Écran du MJ")').count()===1,'Alice (créatrice de la table) est MJ : onglet "Écran du MJ"');
+ok(await bb.locator('#tabs button:has-text("Écran du MJ")').count()===0,'Bob (joueur) n\'a pas l\'onglet "Écran du MJ"');
+const bTxt=await bb.locator('#p-bestiaire').innerText();
+ok(await bb.locator('.mon [data-act=tofight]').count()===0&&!/PV \d|CA \d|XP \d/.test(bTxt)&&await bb.locator('#bmin').count()===0,'Monstropedia du joueur : ni PV, ni CA, ni XP, ni boutons du MJ');
+ok(await a.locator('.mon').first().innerText().then(x=>/PV \d+ · CA \d+/.test(x)),'Monstropedia du MJ : stats complètes');
+await a.click('.mon:has-text("Gobelin pilleur") [data-act=tofight]');await T(1200);
+await a.click('[data-tab=jeu]');await bb.click('[data-tab=jeu]');await T(900);
+const fa=await a.locator('.foe').first().innerText(),fb=await bb.locator('.foe').first().innerText();
+ok(/8\/8/.test(fa)&&/CA 12/.test(fa),'MJ : voit les PV (8/8) et la CA (12) du gobelin');
+ok(/indemne/i.test(fb)&&!/8\/8/.test(fb)&&!/CA\s*\d/.test(fb),'Joueur : ne voit que "Indemne", ni PV ni CA → '+fb.replace(/\n/g,' '));
+ok(await bb.locator('.combat [data-act=foeadd]').count()===0&&await bb.locator('.combat [data-act=foehp]').count()===0&&await bb.locator('.combat [data-act=foeatk]').count()===0,'Joueur : pas de boutons d\'édition ni d\'attaque des ennemis');
+const opt=(await bb.locator('#tgt option').allInnerTexts()).join(' | ');ok(/Gobelin pilleur · Indemne/.test(opt)&&!/Gobelin pilleur · CA/.test(opt),'Joueur : le menu des cibles n\'affiche pas la CA → '+opt.slice(0,80));
+ok(await bb.locator('#mode').count()===0&&await bb.locator('[data-act=condense]').count()===0,'Joueur : pas de réglage du mode MJ ni de condensation');
+await bb.click('[data-act=foetgt]');await bb.click('.atk >> nth=0');await T(1200);
+const rb=await bb.locator('.msg.roll').last().innerText(),ra2=await a.locator('.msg.roll').last().innerText();
+ok(!/vs CA/.test(rb)&&/vs CA 12/.test(ra2),'Attaque de Bob : le MJ lit "vs CA 12", Bob ne lit pas la CA → '+rb.replace(/\n/g,' ').slice(0,70));
+ok((await bb.locator('.msg.sys').allInnerTexts()).every(x=>!/\(\d+\/\d+\)/.test(x)),'Joueur : aucun message ne révèle les PV restants des ennemis');
+// notes privées du MJ
+await a.click('[data-tab=mj]');await T(400);await a.fill('#gmn','Le boss est le maire.');await T(1800);
+ok(/Enregistré/.test(await a.locator('#gmn-st').innerText()),'Notes du MJ : enregistrées automatiquement');
+await a.reload();await rdy(a);await a.click('[data-tab=mj]');await T(1200);ok((await a.inputValue('#gmn'))==='Le boss est le maire.','Notes du MJ : retrouvées après rechargement');
+const aliceUid=await a.evaluate(()=>window.claude.uid),campId=await a.evaluate(()=>localStorage.getItem('gc_camp'));
+const denied=await bb.evaluate(async([u,c])=>{const d=await window.claude.use('db');try{await d.doc('private/'+u+'/notes/'+c).get();return 'lu'}catch(e){return e.code||String(e.message).slice(0,60)}},[aliceUid,campId]);
+ok(/permission/i.test(denied),'Notes du MJ : un autre joueur ne peut pas les lire (règles Firestore) → '+denied);
+const own=await bb.evaluate(async()=>{const d=await window.claude.use('db');const u=window.claude.uid;await d.doc('private/'+u+'/notes/x').set({texte:'ok'});return (await d.doc('private/'+u+'/notes/x').get()).exists});
+ok(own===true,'Contrôle : Bob peut lire ses propres notes privées');
+ok(!(await bb.locator('body').innerText()).includes('Le boss est le maire'),'Bob ne voit jamais le texte des notes');
+// prise de rôle
+await bb.click('[data-tab=monde]');await T(500);ok(!(await bb.locator('#c-monde').count()),'Joueur : le texte du monde est masqué dans l\'onglet Monde');
+await bb.click('[data-act=gmtake]');ok(/Confirmer/i.test(await bb.locator('[data-act=gmtake]').innerText()),'Prendre le rôle d\'un MJ en place demande une confirmation');
+await bb.click('[data-act=gmtake]');await T(1500);
+ok(await bb.locator('#tabs button:has-text("Écran du MJ")').count()===1&&await a.locator('#tabs button:has-text("Écran du MJ")').count()===0,'Bob devient MJ : il gagne l\'écran du MJ, Alice le perd');
+ok(await a.locator('#p-mj').isVisible()===false,'Alice, qui était sur l\'écran du MJ, est ramenée à la table');
 // ===== sécurité =====
 const rest=await fetch(`http://127.0.0.1:8080/v1/projects/demo-quest/databases/(default)/documents/rooms/${code}/pj`);ok(rest.status===403||rest.status===401,'Sécurité : lecture sans connexion refusée ('+rest.status+')');
 const roomList=await fetch(`http://127.0.0.1:8080/v1/projects/demo-quest/databases/(default)/documents/rooms`);ok(roomList.status===403||roomList.status===401||roomList.status===404,'Sécurité : impossible de lister les tables ('+roomList.status+')');
