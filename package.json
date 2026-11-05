@@ -1,7 +1,18 @@
 {
   "name": "quest",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Grimoire de Campagne : outil de table JDR fantasy avec MJ Claude",
-  "devDependencies": { "playwright": "^1.48.0" }
+  "description": "Grimoire de Campagne : outil de table JDR fantasy, en solo ou à plusieurs, avec MJ Claude",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "build:vendor": "esbuild standalone/firebase-entry.js --bundle --minify --format=iife --legal-comments=none --outfile=standalone/firebase-bundle.js",
+    "serve": "python3 -m http.server 5173",
+    "emulator": "firebase emulators:start --only firestore,auth --project demo-quest"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "firebase": "^12.0.0",
+    "firebase-tools": "^14.0.0",
+    "playwright": "^1.48.0"
+  }
 }

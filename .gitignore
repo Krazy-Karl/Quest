@@ -1,2 +1,6 @@
 node_modules/
 *.png
+.firebase/
+*-debug.log
+firestore-debug.log
+dist/

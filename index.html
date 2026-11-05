@@ -261,6 +261,11 @@ label.chip input{width:auto;box-shadow:none}
 </div>
 <div id="toast" class="toast" hidden></div>
 
+<!--STANDALONE-->
+<script src="firebase-config.js"></script>
+<script src="standalone/firebase-bundle.js"></script>
+<script src="standalone/shim.js"></script>
+<!--/STANDALONE-->
 <script>
 (function(){
 'use strict';
@@ -318,7 +323,7 @@ const SIZES=[15,16,17,19,21];
 const SLOTS=[['tete','Tête'],['cou','Cou'],['torse','Torse'],['mains','Mains'],['main1','Main princ.'],['main2','Main second.'],['ceinture','Ceinture'],['jambes','Jambes'],['pieds','Pieds'],['anneau','Anneau']];
 const STATS=[['str','Force','FOR'],['dex','Dextérité','DEX'],['con','Constitution','CON'],['int','Intelligence','INT'],['wis','Sagesse','SAG'],['cha','Charisme','CHA']];
 const KINDS={quete:'Quête',pnj:'Personnage',lieu:'Lieu',note:'Note'};
-const S={db:null,sample:null,dl:null,tab:'jeu',bType:'',bMin:1,bMax:10,bSort:'dg',camps:[],camp:null,combat:[],ini:{ordre:[],tour:0,round:0},dd:0,skOpen:false,target:null,adv:'n',atkEdit:false,combatOpen:false,foeForm:false,itemSel:null,creating:false,fs:+(store('fs')||2),pjs:[],bestiary:[],journal:[],msgs:[],meta:{},sel:null,busy:false,ctl:null,live:{},loaded:{},dbFail:false,diceOut:null,bfilter:'',jfilter:'all',speak:'pj'};
+const S={db:null,sample:null,dl:null,tab:'jeu',presence:{},handled:new Set(),bType:'',bMin:1,bMax:10,bSort:'dg',camps:[],camp:null,combat:[],ini:{ordre:[],tour:0,round:0},dd:0,skOpen:false,target:null,adv:'n',atkEdit:false,combatOpen:false,foeForm:false,itemSel:null,creating:false,fs:+(store('fs')||2),pjs:[],bestiary:[],journal:[],msgs:[],meta:{},sel:null,busy:false,ctl:null,live:{},loaded:{},dbFail:false,diceOut:null,bfilter:'',jfilter:'all',speak:'pj'};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const mod=v=>Math.floor((Number(v||10)-10)/2);
@@ -351,6 +356,8 @@ const party=()=>(S.meta.party||[]).map(id=>S.pjs.find(p=>p.id===id)).filter(Bool
 const inParty=id=>(S.meta.party||[]).includes(id);
 const cpath=(col,id)=>'campagnes/'+S.camp+'/'+col+'/'+id;
 const writeMeta=patch=>{if(!S.camp){toast('Crée d’abord une campagne.');return Promise.reject(new Error('nocamp'))}Object.assign(S.meta,patch);return write('campagnes/'+S.camp,patch,true)};
+const online=()=>!!(window.claude&&window.claude.standalone&&window.claude.mode==='online');
+const isHost=()=>online()&&S.meta.host===window.claude.me;
 function postMsg(m){if(!S.camp){toast('Aucune campagne en cours.');return Promise.resolve()}const t=Date.now();return write(cpath('table','m'+t+uid().slice(0,3)),{t,...m}).catch(()=>{})}
 async function removePj(id){
   S.pjs=S.pjs.filter(x=>x.id!==id);if(S.sel===id)S.sel=(S.meta.party||[]).find(x=>x!==id)||(S.pjs[0]&&S.pjs[0].id)||null;
@@ -405,7 +412,7 @@ function selectCamp(id,silent){
   S.camp=id;if(id)store('camp',id);S.msgs=[];S.journal=[];S.combat=[];S.ini={ordre:[],tour:0,round:0};S.target=null;S.combatOpen=false;
   const c=S.camps.find(x=>x.id===id);S.meta=c||{};
   if(id&&S.db){
-    watch('table',S.db.collection('campagnes/'+id+'/table').orderBy('t','desc').limit(150),sn=>{if(S.camp!==id)return;S.msgs=sn.docs.map(d=>({id:d.id,...d.data()})).reverse();render('table')});
+    watch('table',S.db.collection('campagnes/'+id+'/table').orderBy('t','desc').limit(150),sn=>{if(S.camp!==id)return;S.msgs=sn.docs.map(d=>({id:d.id,...d.data()})).reverse();render('table');autoGM()});
     watch('journal',S.db.collection('campagnes/'+id+'/journal').orderBy('t','desc').limit(300),sn=>{if(S.camp!==id)return;S.journal=sn.docs.map(d=>({id:d.id,...d.data()}));render('journal')});
     watch('combat',S.db.doc('campagnes/'+id+'/combat/etat'),sn=>{if(S.camp!==id)return;const dd=sn.exists?sn.data():{};S.combat=dd.liste||[];S.ini={ordre:dd.ordre||[],tour:dd.tour||0,round:dd.round||0};render('table');render('fiche')});
   }
@@ -415,6 +422,8 @@ function selectCamp(id,silent){
 function setup(){
   const db=S.db;
   watch('pj',db.collection('pj'),s=>{S.pjs=s.docs.map(d=>normPj({id:d.id,...d.data()}));if(!S.sel||!S.pjs.some(p=>p.id===S.sel))S.sel=store('sel')&&S.pjs.some(p=>p.id===store('sel'))?store('sel'):(S.pjs[0]&&S.pjs[0].id);render('fiche');render('table');render('camps');head();if(S.loaded.campagnes&&!S.camps.length)maybeMigrate()});
+  if(online()){const beat=()=>write('presence/'+window.claude.me,{t:Date.now(),name:window.claude.playerName()||'Joueur'}).catch(()=>{});beat();setInterval(beat,20000);
+    watch('presence',db.collection('presence'),sn=>{S.presence=Object.fromEntries(sn.docs.map(d=>[d.id,d.data()]));head();if(S.tab==='monde')render('monde')})}
   watch('bestiaire',db.collection('bestiaire'),s=>{S.bestiary=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.dg||0)-(b.dg||0)||String(a.nom).localeCompare(String(b.nom),'fr'));render('bestiaire')});
   watch('campagnes',db.collection('campagnes'),s=>{
     S.camps=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.t||0)-(a.t||0));
@@ -428,7 +437,7 @@ function setup(){
 function head(){
   const el=$('#camp-line'),m=S.meta;
   if(!S.camps.length){el.textContent='Aucune campagne pour l’instant';return}
-  el.innerHTML=`<select id="camp-sel" class="hsel" aria-label="Campagne en cours">${S.camps.map(c=>`<option value="${c.id}" ${c.id===S.camp?'selected':''}>${esc(c.nom||'Sans nom')}</option>`).join('')}</select> <span>· ${m.mj==='humain'?'MJ humain':'MJ Claude'} · ${party().length} héros</span>`;
+  el.innerHTML=`<select id="camp-sel" class="hsel" aria-label="Campagne en cours">${S.camps.map(c=>`<option value="${c.id}" ${c.id===S.camp?'selected':''}>${esc(c.nom||'Sans nom')}</option>`).join('')}</select> <span>· ${m.mj==='humain'?'MJ humain':'MJ Claude'} · ${party().length} héros${online()?` · ● ${Math.max(1,Object.values(S.presence).filter(p=>Date.now()-(p.t||0)<60000).length)} en ligne`:''}</span>`;
 }
 function render(which,force){
   if(which==='all'){['camps','table','fiche','bestiaire','journal','monde'].forEach(k=>render(k));return}
@@ -441,7 +450,7 @@ function render(which,force){
   ({camps:rCamps,table:rTable,fiche:rFiche,bestiaire:rBest,journal:rJournal,monde:rMonde})[which](el);
 }
 function tabs(){
-  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('')+`<span style="flex:1"></span><button data-snd aria-label="Sons" title="Sons ${SFX.on?'activés':'coupés'}">${SFX.on?'♪':'♪̸'}</button><button data-fs="-1" aria-label="Texte plus petit" title="Texte plus petit">A−</button><button data-fs="1" aria-label="Texte plus grand" title="Texte plus grand">A+</button>`;
+  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('')+`<span style="flex:1"></span>${window.claude&&window.claude.standalone?'<button data-cfg aria-label="Réglages" title="Table en ligne, pseudo, clé API">⚙</button>':''}<button data-snd aria-label="Sons" title="Sons ${SFX.on?'activés':'coupés'}">${SFX.on?'♪':'♪̸'}</button><button data-fs="-1" aria-label="Texte plus petit" title="Texte plus petit">A−</button><button data-fs="1" aria-label="Texte plus grand" title="Texte plus grand">A+</button>`;
 }
 function show(t){
   S.tab=t;tabs();TABS.forEach(([k])=>{$('#p-'+k).hidden=k!==t});
@@ -505,7 +514,7 @@ function rTable(el){
   const ex=$('#expr')?$('#expr').value:'1d20';
   const pj=curPj(),m=S.meta,ia=m.mj!=='humain';
   const lastRoll=[...S.msgs].reverse().find(x=>x.type==='roll'&&x.who!=='Le MJ');
-  const msgs=S.msgs.map(x=>{
+  const msgs=S.msgs.filter(x=>x.type!=='req').map(x=>{
     const c=(x.type==='mj'?'mj':x.type==='roll'?'roll':x.type==='sys'?'sys':x.type==='ooc'?'ooc':'')+(x.type==='roll'&&x.nat===20?' crit':x.type==='roll'&&x.nat===1?' fumble':'');
     const who=x.type==='mj'?(x.mode==='ia'?'Le Maître du Jeu':'Le MJ'):x.type==='ooc'?(x.who||'')+' (hors-jeu)':x.who||'';
     const tag=x.kind==='atk'?'':x.type==='roll'&&x.nat===20?' ✦ Réussite critique !':x.type==='roll'&&x.nat===1?' ✕ Échec critique':'';
@@ -688,12 +697,14 @@ function rCamps(el){
 
 /* ----- Monde ----- */
 function rMonde(el){
+  const sa=window.claude&&window.claude.standalone;
   if(!S.db){el.innerHTML=noDb();return}
   if(!S.camp){el.innerHTML=`<h2>Le monde</h2><div class="note">Le monde appartient à une campagne. Crée-en une dans l’onglet Campagnes.</div>`;return}
   const m=S.meta;
   el.innerHTML=`<h2>Le monde</h2>
   <div class="row"><div class="grow"><label for="c-nom">Nom de la campagne</label><input id="c-nom" value="${esc(m.nom||'')}"></div><div class="grow"><label for="c-ton">Ton</label><input id="c-ton" value="${esc(m.ton||'')}" placeholder="sombre, épique, humoristique…"></div></div>
   <div style="margin-top:10px"><label for="c-monde">Description du monde (lue par le MJ à chaque tour)</label><textarea id="c-monde" rows="9">${esc(m.monde||'')}</textarea></div>
+  ${sa?standaloneBlock():''}
   <h3>Mémoire des sessions</h3>
   <label for="c-resume" class="sr">Mémoire</label><textarea id="c-resume" rows="4" placeholder="Claude la remplit avec « Condenser » sur la table. Tu peux aussi l'écrire ou la corriger.">${esc(m.resume||'')}</textarea>
   <h3>Héros du groupe</h3><div class="chips">${S.pjs.map(p=>`<label class="chip"><input type="checkbox" class="mp" value="${p.id}" ${inParty(p.id)?'checked':''}> ${esc(p.name)}</label>`).join('')||'<span class="muted small">Aucun personnage.</span>'}</div>
@@ -1068,17 +1079,31 @@ function combatStrip(){
 function atkTools(x){
   const bits=[];
   if(x.jds&&x.jds.n>0&&x.jds.tk&&x.jds.tk!=='ca')bits.push(`<button class="g small" data-act="applyd" data-n="${x.jds.n}" data-tid="${esc(x.jds.tid)}" data-half="0">Cible ratée : −${x.jds.n} PV</button><button class="g small" data-act="applyd" data-n="${x.jds.n}" data-tid="${esc(x.jds.tid)}" data-half="1">Réussie : −${Math.floor(x.jds.n/2)} PV</button>`);
-  if(S.sample&&S.meta.mj!=='humain'&&!S.busy)bits.push(`<button class="g small" data-act="narrate">Raconter au MJ</button>`);
+  if((S.sample||online())&&S.meta.mj!=='humain'&&!S.busy)bits.push(`<button class="g small" data-act="narrate">Raconter au MJ</button>`);
   return bits.length?`<div class="tools">${bits.join('')}</div>`:'';
 }
 
 
 /* ---------- MJ Claude ---------- */
 const logLine=x=>x.type==='mj'?`MJ : ${x.text}`:x.type==='sys'?`[système] ${x.text}`:`${x.who||'?'} : ${x.text}`;
+function autoGM(){
+  if(!isHost()||!S.sample||S.busy||S.meta.mj==='humain')return;
+  const last=[...S.msgs].reverse().find(m=>m.type==='mj'||m.type==='joueur'||m.type==='req');
+  if(!last||last.type==='mj'||S.handled.has(last.id)||Date.now()-(last.t||0)>180000)return;
+  S.handled.add(last.id);ask(last.text,S.pjs.find(x=>x.name===last.who)||null);
+}
+function standaloneBlock(){
+  const c=window.claude,on=online(),host=S.meta.host,mine=on&&host===c.me;
+  const names=Object.values(S.presence).filter(p=>Date.now()-(p.t||0)<60000).map(p=>p.name||'Joueur');
+  return `<h3>${on?'Table en ligne':'Solo'}</h3>
+  ${on?`<p class="small">Code : <b>${esc(c.room)}</b> · en ligne : ${esc(names.join(', ')||'toi')}</p>`:''}
+  <div class="row"><button class="g" data-cfg>Réglages et lien de la table</button>${on&&S.meta.mj!=='humain'?`<button class="${mine?'b':'g'}" data-act="host" ${S.sample||mine?'':'disabled'}>${mine?'Tu es l’hôte du MJ Claude (cliquer pour quitter)':'Devenir l’hôte du MJ Claude'}</button>`:''}</div>
+  ${on&&S.meta.mj!=='humain'?`<p class="small muted">${mine?'Ton navigateur répond aux joueurs avec ta clé API. Garde cet onglet ouvert.':host?'Un autre joueur est l’hôte du MJ.':'Aucun hôte : le MJ ne répondra pas tant qu’un joueur n’est pas devenu hôte.'}${S.sample?'':' Pour devenir hôte, ajoute ta clé API dans ⚙.'}</p>`:''}`;
+}
 function pjLine(p){return `${p.name} (${p.race||'?'} ${p.classe||'?'}, niv. ${p.niveau||1}) — PV ${p.pv}/${p.pvMax}${p.pmMax>0?`, PM ${p.pm}/${p.pmMax}`:''}, CA ${p.ca}, XP ${p.xp}, Or ${p.or}; `+STATS.map(([k,l])=>`${l} ${p.stats[k]} (${sgn(mod(p.stats[k]))})`).join(', ')+`; Équipé : ${SLOTS.map(([k,l])=>p.equip[k]?l+' '+p.equip[k]:'').filter(Boolean).join(', ')||'rien'}; États : ${p.etats.join(', ')||'aucun'}; Maîtrises : ${p.comp.join(', ')||'aucune'}; XP ${p.xp||0}/${nextXp(p.niveau)||'—'}; Attaques : ${p.atq.map(a=>`${a.nom} ${a.jet==='atk'?sgn(atkBonus(p,a))+' ':''}(${dmgLabel(p,a)}${a.pm?`, ${a.pm} PM`:''})`).join(', ')||'aucune'}; Inventaire : ${p.inv.map(i=>`${i.n}${(i.q||1)>1?' ×'+i.q:''}`).join(', ')||'vide'}`}
 function buildPrompt(userText,pj){
   const m=S.meta,since=m.resumeAt||0;
-  const recent=S.msgs.filter(x=>x.t>since&&x.type!=='ooc').slice(-30).map(logLine).join('\n');
+  const recent=S.msgs.filter(x=>x.t>since&&x.type!=='ooc'&&x.type!=='req').slice(-30).map(logLine).join('\n');
   return `Tu es le Maître du Jeu d'un jeu de rôle fantasy, en français, joué sur une table partagée. Tu narres, tu incarnes les PNJ, tu arbitres.
 RÈGLES DU JEU : d20 + modificateur de caractéristique contre un seuil (facile 8, moyen 12, difficile 16, héroïque 20). Les chiffres sont gérés à la main : tu ne dois JAMAIS les inventer ni les supposer. Les messages hors-jeu ne te sont pas transmis.
 - Plusieurs héros peuvent jouer : le message indique lequel parle. Agis sur SON id pour ses jets et ses changements de fiche.
@@ -1171,7 +1196,7 @@ function tools(){
     async execute(i){const kind=KINDS[i.kind]?String(i.kind):'note';await write(cpath('journal','j'+Date.now()+uid().slice(0,3)),{t:Date.now(),kind,titre:String(i.titre),texte:String(i.texte)});return 'Noté.'}}
   ];
 }
-const ERR={not_granted:'Tu as refusé l’accès à Claude. Recharge la page pour réessayer, ou passe en MJ humain.',rate_limited:'Trop d’appels ou limite d’usage atteinte. Patiente un peu avant de renvoyer.',session_expired:'Session expirée : reconnecte-toi à claude.ai.',sampling_disabled:'Claude n’est pas disponible pour ce compte.',upstream_error:'Le MJ a eu un souci de connexion. Réessaie.',refused:'Le MJ a refusé de répondre à ce message. Reformule.',empty_completion:'Le MJ n’a rien écrit. Reformule ou réessaie.',prompt_too_large:'La mémoire est trop longue : utilise « Condenser la mémoire ».'};
+const ERR={bad_key:'Clé API refusée : vérifie-la dans ⚙ (Réglages).',not_granted:'Tu as refusé l’accès à Claude. Recharge la page pour réessayer, ou passe en MJ humain.',rate_limited:'Trop d’appels ou limite d’usage atteinte. Patiente un peu avant de renvoyer.',session_expired:'Session expirée : reconnecte-toi à claude.ai.',sampling_disabled:'Claude n’est pas disponible pour ce compte.',upstream_error:'Le MJ a eu un souci de connexion. Réessaie.',refused:'Le MJ a refusé de répondre à ce message. Reformule.',empty_completion:'Le MJ n’a rien écrit. Reformule ou réessaie.',prompt_too_large:'La mémoire est trop longue : utilise « Condenser la mémoire ».'};
 async function ask(userText,pj){
   if(!S.sample){toast('Claude indisponible ici : passe en MJ humain.');return}
   S.busy=true;S.ctl=new AbortController();render('table');
@@ -1185,13 +1210,13 @@ async function ask(userText,pj){
   }catch(e){
     if(e&&e.code!=='cancelled')toast(ERR[e&&e.code]||'Erreur du MJ ('+(e&&e.code||e&&e.message)+')');
     if(e&&e.text&&e.code!=='cancelled'&&e.code!=='refused')await postMsg({type:'mj',mode:'ia',text:e.text.trim()+' […]'});
-  }finally{S.busy=false;S.ctl=null;render('table')}
+  }finally{S.busy=false;S.ctl=null;render('table');setTimeout(autoGM,400)}
 }
 async function condense(){
   if(!S.sample)return toast('Claude indisponible ici.');
   S.busy=true;render('table');
   try{
-    const log=S.msgs.filter(x=>x.t>(S.meta.resumeAt||0)&&x.type!=='ooc').map(logLine).join('\n').slice(-60000);
+    const log=S.msgs.filter(x=>x.t>(S.meta.resumeAt||0)&&x.type!=='ooc'&&x.type!=='req').map(logLine).join('\n').slice(-60000);
     const {text}=await S.sample(`Tu tiens la mémoire d'une campagne de jeu de rôle. Réécris un résumé unique, en français, de 150 à 300 mots : faits importants, lieux, PNJ et leur attitude, quêtes en cours, promesses, dettes, ennemis. Sans les chiffres de fiche.\n\nRÉSUMÉ ACTUEL :\n${S.meta.resume||'(aucun)'}\n\nNOUVEAUX ÉVÉNEMENTS :\n${log}`,{cache:false,modelTier:'default'});
     await writeMeta({resume:text.trim(),resumeAt:Date.now()});toast('Mémoire mise à jour.');
   }catch(e){if(e&&e.code!=='cancelled')toast(ERR[e&&e.code]||'Résumé impossible.')}
@@ -1211,6 +1236,7 @@ document.addEventListener('click',async ev=>{
   const t=ev.target.closest('button');if(!t)return;
   if(t.dataset.tab)return show(t.dataset.tab);
   if(t.dataset.iv!=null){S.itemSel=S.itemSel===+t.dataset.iv?null:+t.dataset.iv;render('fiche',true);return}
+  if(t.dataset.cfg!==undefined){if(window.claude&&window.claude.openSettings)window.claude.openSettings();return}
   if(t.dataset.snd!==undefined){SFX.on=!SFX.on;store('snd',SFX.on?'1':'0');tabs();snd('turn');return}
   if(t.dataset.asi){const pp=curPj();const k=t.dataset.asi;if(pp)patchPj(pp.id,c=>{if(c.asi>0&&c.stats[k]<20){c.stats[k]++;c.asi--}}).catch(()=>{});return}
   if(t.dataset.chk){const pp=curPj();const sk=SKILLS.find(x=>x[0]===t.dataset.chk);if(pp&&sk){S.skOpen=true;const adv=S.adv==='n'?'':S.adv;S.adv='n';await doCheck(pp,`${sk[0]} (${STATS.find(x=>x[0]===sk[1])[2]})`,skillBonus(pp,sk),S.dd,adv);render('fiche',true)}return}
@@ -1234,11 +1260,11 @@ document.addEventListener('click',async ev=>{
      if(asMj){await postMsg({type:'mj',mode:'humain',text:txt});break}
      if(S.camp&&p&&!inParty(p.id))writeMeta({party:[...(S.meta.party||[]),p.id]}).then(()=>{head()}).catch(()=>{});
      await postMsg({type:'joueur',who:p?p.name:'Joueur',text:txt});
-     if(S.meta.mj!=='humain')ask(txt,p);break}
+     if(S.meta.mj!=='humain'){if(!online())ask(txt,p);else if(!S.meta.host)toast('Aucun hôte pour le MJ Claude : un joueur doit le devenir (onglet Monde).')}break}
    case 'dmg':case 'heal':{const n=Math.abs(+t.dataset.n||0);if(!p||!n)return;
      await patchPj(p.id,c=>{const mx=c.pvMax>0?c.pvMax:Infinity;c.pv=Math.max(0,Math.min(mx,c.pv+(a==='dmg'?-n:n)))}).catch(()=>{});
      await postMsg({type:'sys',text:`${p.name} ${a==='dmg'?'perd':'récupère'} ${n} PV`});break}
-   case 'regen':{if(S.busy)return;const idx=S.msgs.map(m=>m.type).lastIndexOf('joueur');if(idx<0)return;const last=S.msgs[idx];
+   case 'regen':{if(S.busy)return;if(online()&&!isHost())return toast('Seul l’hôte du MJ Claude peut régénérer.');const idx=S.msgs.map(m=>m.type).lastIndexOf('joueur');if(idx<0)return;const last=S.msgs[idx];
      const old=S.msgs.slice(idx+1).filter(m=>m.type==='mj'&&m.mode==='ia');for(const m of old)await del(cpath('table',m.id));
      S.msgs=S.msgs.filter(m=>!old.includes(m));toast('Les changements de fiche déjà faits par le MJ restent.');ask(last.text,S.pjs.find(x=>x.name===last.who)||p);break}
    case 'undo':{const m=S.msgs[S.msgs.length-1];if(m&&!S.busy){S.msgs.pop();render('table');await del(cpath('table',m.id))}break}
@@ -1274,7 +1300,8 @@ document.addEventListener('click',async ev=>{
    case 'foeclear':if(t.dataset.sure!=='1'){t.dataset.sure='1';t.textContent='Confirmer';return}
      S.ini={ordre:[],tour:0,round:0};await mutateCombat(()=>[]);S.combatOpen=false;if(S.target&&S.target.k==='enemy')S.target=null;render('fiche',true);break;
    case 'applyd':{const tg=targetById(t.dataset.tid);const n=+t.dataset.n;const v=t.dataset.half==='1'?Math.floor(n/2):n;if(tg)await hurt(tg,v);break}
-   case 'narrate':if(!S.busy)ask('(Les jets ci-dessus viennent d’être résolus par le moteur de jeu. Raconte le résultat de façon immersive et fais avancer la scène. Ne relance rien.)',p);break;
+   case 'narrate':{if(S.busy)return;const nt='(Les jets ci-dessus viennent d’être résolus par le moteur de jeu. Raconte le résultat de façon immersive et fais avancer la scène. Ne relance rien.)';if(online())await postMsg({type:'req',who:p?p.name:'',text:nt});else ask(nt,p);break}
+   case 'host':{if(!online())break;if(isHost())await writeMeta({host:''}).catch(()=>{});else if(S.sample)await writeMeta({host:window.claude.me}).then(()=>{toast('Tu es l’hôte : ton navigateur répond aux joueurs.');setTimeout(autoGM,300)}).catch(()=>{});head();render('monde');break}
    case 'rollini':await rollInitiative();break;
    case 'nextturn':await nextTurn();break;
    case 'givexp':await giveXp();break;
