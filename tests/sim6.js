@@ -1,0 +1,11 @@
+const {chromium}=require('playwright');const fs=require('fs');
+const mock=fs.readFileSync('mock.js','utf8').trim();const seed=fs.readFileSync('seed5.json','utf8');
+const res=[];const ok=(c,m)=>{res.push((c?'✓ ':'✗ ')+m);if(!c)process.exitCode=1};
+(async()=>{const b=await chromium.launch();const pg=await (await b.newContext({viewport:{width:1280,height:1000},reducedMotion:'reduce'})).newPage();
+const errs=[];pg.on('pageerror',e=>errs.push(e.message));await pg.addInitScript(`(${mock})(${seed})`);
+await pg.goto('file://'+process.cwd()+'/../index.html');await pg.waitForTimeout(600);const T=ms=>pg.waitForTimeout(ms);
+await pg.click('[data-tab=jeu]');await pg.fill('#say','Je pousse la porte.');await pg.press('#say','Enter');await pg.waitForFunction(()=>document.querySelectorAll('.msg.mj').length>0,null,{timeout:8000});await T(300);
+ok(await pg.locator('.msg.mj .mnote').count()===1,'Journal : bouton "✎ Noter" sur la réponse du MJ');
+await pg.click('.mnote');await T(400);await pg.click('[data-tab=journal]');await T(200);
+ok(await pg.locator('#p-journal article').count()===1&&(await pg.locator('#p-journal article').innerText()).includes('La porte cède'),'Journal : la réponse est copiée dans le journal');
+console.log(res.join('\n'));console.log('ERREURS JS:',JSON.stringify(errs));await b.close()})().catch(e=>{console.log(res.join('\n'));console.log('FAIL',e.message.split('\n')[0]);process.exit(1)});

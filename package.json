@@ -1,0 +1,7 @@
+{
+  "name": "quest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Grimoire de Campagne : outil de table JDR fantasy avec MJ Claude",
+  "devDependencies": { "playwright": "^1.48.0" }
+}
